@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import os
-from animation_creator import create_forecast_evolution_animation
+from animation_creator import create_forecast_evolution_animation, create_rmse_analysis
 import time
 
 # Configurazione pagina
@@ -29,6 +29,12 @@ st.markdown("""
 # Header
 st.title("🌦️ Dashboard Previsioni Meteo - Piemonte")
 st.markdown("Evoluzione delle previsioni GFS per un momento target")
+
+# Inizializza session state
+if 'rmse_fig' not in st.session_state:
+    st.session_state.rmse_fig = None
+if 'last_generation' not in st.session_state:
+    st.session_state.last_generation = None
 
 # Sidebar con controlli
 st.sidebar.header("⚙️ Configurazione")
@@ -133,13 +139,27 @@ if update_button:
             status_text.text("📥 Download run GFS...")
             progress_bar.progress(30)
             
-            anim = create_forecast_evolution_animation(
+            # MODIFICA: Ora la funzione restituisce sia anim che datasets
+            anim, datasets = create_forecast_evolution_animation(
                 target_time=target,
                 days_back=days_back,
                 variable=var_code,
                 level=level,
                 output_file=gif_path
             )
+            
+            progress_bar.progress(70)
+            status_text.text("📊 Generazione analisi RMSE...")
+            
+            # Crea il plot RMSE e salvalo in session state
+            st.session_state.rmse_fig = create_rmse_analysis(
+                datasets=datasets,
+                target_time=target,
+                variable_name=var_code
+            )
+            
+            # Salva timestamp generazione
+            st.session_state.last_generation = datetime.now()
             
             progress_bar.progress(90)
             status_text.text("✅ Generazione completata!")
@@ -149,7 +169,7 @@ if update_button:
             status_text.empty()
             progress_bar.empty()
             
-            st.success("✅ Animazione generata con successo!")
+            st.success("✅ Animazione e analisi generate con successo!")
             st.balloons()
             
         except Exception as e:
@@ -164,7 +184,7 @@ if os.path.exists(gif_path):
     col_gif, col_info = st.columns([2, 1])
     
     with col_gif:
-        st.image(gif_path, use_container_width=True)
+        st.image(gif_path, width='stretch')
     
     with col_info:
         st.info("""
@@ -180,6 +200,10 @@ if os.path.exists(gif_path):
         file_size = os.path.getsize(gif_path) / 1024  # KB
         st.caption(f"Dimensione file: {file_size:.1f} KB")
         
+        # Info ultima generazione
+        if st.session_state.last_generation:
+            st.caption(f"Ultima generazione: {st.session_state.last_generation.strftime('%H:%M:%S')}")
+        
         # Download button
         with open(gif_path, 'rb') as f:
             st.download_button(
@@ -188,6 +212,35 @@ if os.path.exists(gif_path):
                 file_name=f"previsione_{target_date}_{var_code}.gif",
                 mime="image/gif"
             )
+    
+    # SEZIONE AGGIUNTA: Visualizza analisi RMSE
+    st.markdown("---")
+    st.subheader("📈 Analisi Evoluzione Previsioni")
+    
+    # MODIFICA: Usa session state invece di variabile locale
+    if st.session_state.rmse_fig is not None:
+        st.pyplot(st.session_state.rmse_fig)
+        
+        col_rmse1, col_rmse2 = st.columns(2)
+        
+        with col_rmse1:
+            st.markdown("""
+            **📊 Interpretazione RMSE:**
+            - **Valori alti**: Maggiore discrepanza con l'ultima previsione
+            - **Valori bassi**: Maggiore accordo con l'ultima previsione
+            - **Trend decrescente**: Previsioni che convergono nel tempo
+            """)
+        
+        with col_rmse2:
+            st.markdown("""
+            **🎯 Cosa osservare:**
+            - La linea rossa indica l'ultimo run (riferimento)
+            - Run più vecchi dovrebbero avere RMSE più alti
+            - Convergenza verso RMSE basso indica stabilità
+            """)
+    else:
+        st.warning("Analisi RMSE non disponibile. Rigenera l'animazione.")
+        
 else:
     st.info("👆 Clicca su 'Genera Animazione' per creare la visualizzazione")
     
